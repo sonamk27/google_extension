@@ -1,0 +1,10 @@
+{
+  "name": "visual-privacy-agent",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:server": "npm install --prefix server",
+    "start": "npm start --prefix server",
+    "dev": "npm run dev --prefix server"
+  }
+}

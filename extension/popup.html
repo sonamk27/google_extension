@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <h1>Visual Privacy Agent</h1>
+
+  <label for="task">Task for the agent</label>
+  <input id="task" type="text" placeholder="e.g. Click the submit button" />
+
+  <div class="row">
+    <label class="checkbox">
+      <input type="checkbox" id="enableCaption" />
+      Local caption (bundled Transformers.js — first use downloads model weights, ~200MB)
+    </label>
+  </div>
+
+  <label for="serverUrl">Server URL</label>
+  <input id="serverUrl" type="text" placeholder="http://localhost:5000" />
+
+  <button id="runBtn">Capture &amp; run</button>
+
+  <div id="status" class="status"></div>
+  <img id="preview" class="preview" style="display: none" />
+  <pre id="output" class="output"></pre>
+
+  <script src="popup.js"></script>
+</body>
+</html>
