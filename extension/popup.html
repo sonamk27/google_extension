@@ -5,26 +5,73 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <h1>Visual Privacy Agent</h1>
-
-  <label for="task">Task for the agent</label>
-  <input id="task" type="text" placeholder="e.g. Click the submit button" />
-
-  <div class="row">
-    <label class="checkbox">
-      <input type="checkbox" id="enableCaption" />
-      Local caption (bundled Transformers.js — first use downloads model weights, ~200MB)
-    </label>
+  <div class="header">
+    <div class="brand">
+      <span class="shield-icon">🛡️</span>
+      <div>
+        <h1 class="title">Visual Privacy Agent</h1>
+        <div class="subtitle">On-device PII &amp; face redaction</div>
+      </div>
+    </div>
+    <span id="agentBadge" class="badge badge-ready">READY</span>
   </div>
 
-  <label for="serverUrl">Server URL</label>
-  <input id="serverUrl" type="text" placeholder="http://localhost:5000" />
+  <div class="section">
+    <label for="task" class="section-label">Goal / Instruction</label>
+    <div class="input-group">
+      <input id="task" type="text" placeholder="e.g. Type test@email.com and submit" />
+    </div>
 
-  <button id="runBtn">Capture &amp; run</button>
+    <div class="quick-chips">
+      <span class="chip" data-task="Click the primary button">Click button</span>
+      <span class="chip" data-task="Type username and password into form">Fill form</span>
+      <span class="chip" data-task="Scroll down to read content">Scroll down</span>
+    </div>
+  </div>
 
-  <div id="status" class="status"></div>
-  <img id="preview" class="preview" style="display: none" />
-  <pre id="output" class="output"></pre>
+  <div class="config-card">
+    <div class="config-header" id="configToggle">
+      <span>⚙️ Settings &amp; Security</span>
+      <span id="configArrow">▾</span>
+    </div>
+    <div class="config-body" id="configBody" style="display: none;">
+      <label for="serverUrl">Backend Server URL</label>
+      <input id="serverUrl" type="text" placeholder="http://localhost:5000" />
+
+      <label for="extensionSecret">Extension Auth Secret</label>
+      <input id="extensionSecret" type="password" placeholder="Shared secret key" />
+
+      <label for="maxSteps">Max Autonomous Steps</label>
+      <input id="maxSteps" type="number" min="1" max="10" value="6" />
+
+      <div class="toggle-row">
+        <label class="checkbox">
+          <input type="checkbox" id="enableLoop" checked />
+          Run Autonomous Multi-Step Loop
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <label class="checkbox">
+          <input type="checkbox" id="enableCaption" />
+          Local Vision Captioner (Transformers.js)
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <button id="runBtn" class="primary-btn">
+    <span class="btn-text">Execute Task</span>
+  </button>
+
+  <div id="statusAlert" class="status-alert" style="display: none;"></div>
+
+  <div class="trace-section">
+    <div class="trace-title">Execution Trace</div>
+    <div id="traceContainer" class="trace-container">
+      <div class="empty-trace">No actions taken yet. Enter a task and click Execute.</div>
+    </div>
+  </div>
 
   <script src="popup.js"></script>
 </body>

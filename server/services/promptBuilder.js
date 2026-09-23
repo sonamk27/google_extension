@@ -1,4 +1,7 @@
-export function buildPrompt({ task, caption, domSummary, viewport }) {
+// server/services/promptBuilder.js
+// Constructs structured prompt context including sanitized DOM, screen caption, and multi-step action history.
+
+export function buildPrompt({ task, caption, domSummary, viewport, history = [] }) {
   const elementList = (domSummary || [])
     .map(
       (e) =>
@@ -8,19 +11,30 @@ export function buildPrompt({ task, caption, domSummary, viewport }) {
     )
     .join("\n");
 
-  return `You are a browser automation agent. You receive a SANITIZED view of a web page: a redacted screenshot (sensitive regions are blacked out) plus a structured list of interactive elements extracted from the DOM. Sensitive fields (passwords, card numbers, etc.) are marked [SENSITIVE-REDACTED] and their text content is intentionally hidden from you - never ask for it or try to infer it.
+  const historySummary =
+    history && history.length > 0
+      ? history
+          .map(
+            (h, i) =>
+              `- Step ${i + 1}: ${h.action?.type || "unknown"} (targetId: ${h.action?.targetId || "none"}) -> status: ${
+                h.execResult ? (h.execResult.ok ? "succeeded" : "failed") : "done"
+              }`
+          )
+          .join("\n")
+      : "(no previous steps in this session)";
 
-User's task: "${task}"
+  return `You are a browser automation agent. You receive a SANITIZED view of a web page: a redacted screenshot (sensitive regions, PII, and faces are blacked out) plus a structured list of interactive elements extracted from the DOM. Sensitive fields (passwords, card numbers, personal identifiers) are marked [SENSITIVE-REDACTED] and their text content is intentionally obscured for user privacy.
 
-Local vision model caption of the screen: "${caption || "not available"}"
+User Task: "${task}"
 
-Viewport: ${viewport ? `${viewport.w}x${viewport.h}` : "unknown"}
+Local Vision Caption: "${caption || "not available"}"
+Viewport Dimensions: ${viewport ? `${viewport.w}x${viewport.h}` : "unknown"}
 
-Interactive elements on screen:
+History of previous actions in this task:
+${historySummary}
+
+Interactive elements currently visible on screen:
 ${elementList || "(none detected)"}
 
-Decide the single next best UI action to accomplish the task. Respond with ONLY a JSON object, no prose, no markdown fences, in exactly this shape:
-{"type": "click" | "scroll" | "type" | "none", "targetId": "<agentId or null>", "value": "<string or null>", "reasoning": "<one short sentence>"}
-
-If the task is already complete or no safe action exists, use {"type": "none", "targetId": null, "value": null, "reasoning": "..."}.`;
+Use the submit_action tool to choose the single next best action to advance or complete the user's task. If the goal is satisfied or no safe action remains, submit an action with type "none".`;
 }

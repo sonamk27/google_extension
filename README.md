@@ -1,151 +1,146 @@
 # Visual Privacy Agent
 
-On-device visual perception for a light-weight browser agent. A Chrome extension
-reads the screen locally, redacts anything sensitive **before it ever leaves the
-browser**, and only a sanitized summary is sent to a server-side VLM/LLM, which
-returns a single UI action for the extension to execute.
+On-device visual perception and privacy enforcement for a light-weight browser agent. A Chrome extension
+reads the screen locally, redacts anything sensitive (passwords, payment cards, names/places via on-device NER, and faces) **before it ever leaves the browser**, and sends only a sanitized summary to a server-side VLM/LLM, which returns structured UI actions for the extension to execute in a multi-step loop.
 
-Built for: *On-device Visual Perception for Light-weight Browser Agents* (SIH-style problem statement).
+Built for: *On-device Visual Perception for Light-weight Browser Agents* (SIH problem statement).
 
-## Architecture
+---
 
-```
- User's screen
-      |
-      v
-+-----------------------------------------------------+
-|  Browser extension (Manifest V3)                     |
-|                                                       |
-|  content.js        -> walks the DOM, flags sensitive  |
-|                        fields (password/card/etc),    |
-|                        returns bounding boxes          |
-|                                                       |
-|  background.js     -> orchestrator (service worker)   |
-|                        captures screenshot, calls      |
-|                        offscreen doc, calls server      |
-|                                                       |
-|  offscreen.js       -> the ONLY place pixels are        |
-|  (offscreen doc)       touched: blacks out sensitive    |
-|                        regions on canvas, then runs a   |
-|                        local vision model (Transformers |
-|                        .js, WebGPU/WASM) on the         |
-|                        ALREADY-REDACTED image           |
-+-----------------------------------------------------+
-      |  sanitized image + sanitized DOM summary only
-      v
-+-----------------------------------------------------+
-|  Server (Node/Express)                                |
-|                                                        |
-|  routes/agent.js    -> rejects any payload that still  |
-|                         contains unredacted sensitive   |
-|                         text (defense in depth)         |
-|  services/vlmClient -> sends sanitized context to a     |
-|                         cloud VLM (or a mock, offline)  |
-|                         and returns a strict JSON action|
-+-----------------------------------------------------+
-      |  {type, targetId, value, reasoning}
-      v
- content.js executes the action (click / scroll / type)
- back in the page.
-```
-
-**Privacy guarantee in one sentence:** redaction happens on-device, on pixels and
-on DOM text, before the first network request is ever made — the server never
-receives an unredacted password field, card number, or other flagged PII.
-
-## What's inside
+## Architecture & Privacy Pipeline
 
 ```
-extension/        Chrome extension (client) — Manifest V3
+  User's Screen
+       │
+       ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│  Browser Extension (Manifest V3)                                       │
+│                                                                        │
+│  content.js        ──► Walks DOM, identifies sensitive form inputs     │
+│                        (passwords, credit cards, SSN, OTP, emails)     │
+│                                                                        │
+│  background.js     ──► Orchestrator & Multi-Step Agent Loop            │
+│                        Captures visible tab, dispatches NER & vision,  │
+│                        measures latency timings, executes UI actions   │
+│                                                                        │
+│  offscreen.js      ──► THE ONLY PLACE RAW PIXELS ARE ACCESSED          │
+│    (Isolated Doc)      1. Detects faces on raw canvas                  │
+│                        2. Runs on-device NER (Xenova/bert-base-NER)    │
+│                           on plain-text DOM elements                   │
+│                        3. Blacks out sensitive regions & faces         │
+│                        4. Optionally captions redacted screen          │
+│                           (vit-gpt2, WebGPU / WASM fallback)           │
+└────────────────────────────────────────────────────────────────────────┘
+       │  Sanitized JPEG + Sanitized DOM Summary + x-extension-token
+       ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│  Hardened Server (Node / Express)                                      │
+│                                                                        │
+│  routes/agent.js   ──► Shared-secret authentication (401 check)        │
+│                        Rate limiting (150 req/15m)                     │
+│                        Input schema & size boundary validation         │
+│                        Defense-in-depth leak detector (rejects leaks)  │
+│                                                                        │
+│  services/vlmClient──► Structured output via Claude Tool Use           │
+│                        (submit_action tool schema) or multi-step mock  │
+└────────────────────────────────────────────────────────────────────────┘
+       │  Structured UI Action: { type, targetId, value, reasoning }
+       ▼
+  content.js executes action on page (click / scroll / type with React support)
+```
+
+---
+
+## Key Features
+
+1. **On-Device Plain-Text NER**: Uses `Xenova/bert-base-NER` via Transformers.js in an isolated offscreen document to catch personal names (`PER`), locations (`LOC`), and organizations (`ORG`) embedded in plain text, not just input form fields.
+2. **On-Device Face Redaction**: Detects human faces on the raw screenshot canvas using on-device detectors before image export, blacking them out irreversibly.
+3. **Server-Side Security Hardening**:
+   - **Shared-Secret Header**: `x-extension-token` verification rejects unauthorized access with 401.
+   - **Rate Limiting**: Built-in rate limiting middleware protects backend VLM resources.
+   - **Payload Validation**: Strict length caps on task text, image size, and DOM elements.
+   - **Defense-in-Depth Leak Guard**: Rejects any request containing unredacted sensitive values with status 400.
+4. **Extension Robustness & Framework Support**:
+   - Native property descriptor setter for React/Vue/Angular controlled inputs.
+   - Automatic fetch retry with exponential backoff on transient network failures.
+5. **Multi-Step Autonomous Agent Loop**:
+   - Configurable autonomous loop (`runAgentLoop`) that iteratively executes actions until task completion.
+   - Maintains action history passed to prompt builder to prevent repetitive loops.
+6. **Structured Output via Claude Tool Use**:
+   - Enforces action schema with `submit_action` tool definition (`type`, `targetId`, `value`, `reasoning`).
+7. **End-to-End Latency Instrumentation**:
+   - Detailed timing breakdown per step (Capture, DOM Scan, NER, Redaction, Server Latency, Execution).
+8. **Automated Test Suite**:
+   - Unit tests for PII rules, DPR coordinate scaling math, server authentication, leak detection, and mock actions.
+
+---
+
+## Directory Structure
+
+```
+extension/
   manifest.json
-  content.js       DOM walker + sensitive-field detector + action executor
-  background.js    Orchestrator (service worker)
-  offscreen.html/.js   Canvas redaction + local vision model (Transformers.js)
-  popup.html/.js/.css  UI to trigger a task and see the sanitized preview + result
+  content.js             # DOM walker, sensitive attribute scanner, synthetic input setter
+  background.js          # Service worker orchestrator & multi-step agent loop
+  offscreen.html/.js     # Canvas redaction, on-device NER, and face detector
+  lib/
+    privacyRules.js      # Pure PII pattern matching functions
+    redactionMath.js     # DPI/DPR scaling and margin calculation functions
+    mediapipe/
+      faceDetector.js    # Canvas face detection with native Shape Detection & fallback
+    transformers/        # Vendored Transformers.js library and WASM binaries
+  popup.html/.js/.css    # Modern UI with step-by-step trace viewer and timing chips
 
-server/           Backend (Node + Express)
-  server.js
-  routes/agent.js       POST /api/agent — the only endpoint
-  services/vlmClient.js Calls Anthropic API, or mock mode (no key needed)
-  services/promptBuilder.js
-  .env.example
+server/
+  server.js              # Express server with rate limiter & CORS control
+  routes/agent.js        # POST /api/agent with token auth, validation, leak guard
+  services/
+    vlmClient.js         # Claude Tool Use client & multi-step mock mode
+    promptBuilder.js     # Context prompt generator with action history
+  tests/
+    server.test.js       # Server integration and middleware tests
+  .env.example           # Configuration template
+
+tests/
+  extension-rules.test.js# Pure function tests (privacy detection & redaction math)
 ```
 
-## Run it
+---
 
-### 1. Backend
+## Quick Start
 
-```bash
+### 1. Server Setup
+
+```powershell
 cd server
 npm install
-cp .env.example .env
 npm start
 ```
 
-By default `MOCK_MODE=true` in `.env.example`, so the server runs **with no API
-key** and returns a deterministic simulated action — good for a first test of the
-whole pipeline offline. You should see:
+Runs with `MOCK_MODE=true` by default (no API key required). To use a live Claude model:
+1. In `server/.env`, set `MOCK_MODE=false`.
+2. Add your `ANTHROPIC_API_KEY=sk-ant-...`.
+3. Model is set to `claude-3-7-sonnet-20250219`.
 
+### 2. Extension Installation
+
+1. Open Chrome and navigate to `chrome://extensions`.
+2. Enable **Developer mode** in the top right.
+3. Click **Load unpacked** and select the `extension/` directory.
+4. Pin the extension icon.
+
+### 3. Run Automated Tests
+
+Run the full automated test suite from the repository root:
+
+```powershell
+npm test
 ```
-Visual privacy agent server listening on http://localhost:5000
-Mock mode: ON — no API key required, returns simulated actions.
-```
 
-To use a real VLM instead: set `MOCK_MODE=false` and `ANTHROPIC_API_KEY=your_key`
-in `.env`, then restart.
-
-Quick manual check:
-```bash
-curl http://localhost:5000/health
-```
-
-### 2. Extension
-
-1. Open `chrome://extensions`
-2. Enable **Developer mode** (top right)
-3. Click **Load unpacked** and select the `extension/` folder
-4. Pin the extension, open any normal web page (not a `chrome://` page),
-   click the extension icon
-5. Type a task (e.g. *"Click the login button"*) and click **Capture & run**
-
-The popup will show the local processing log, the redacted screenshot that was
-actually sent to the server, and the JSON action the server returned.
-
-**First run note:** if you tick "Local caption," the first click downloads the
-model's *weights* (~200MB of numeric data, not code) from Hugging Face and
-caches them in the browser. That first run can take 10–30s; subsequent runs
-are fast. It's **off by default** so your first end-to-end test is fast and
-reliable — turn it on once the base pipeline (DOM extraction → redaction →
-server round trip → action) is working for you.
-
-## Evaluation criteria mapping
-
-| Criterion | Where it's addressed |
-|---|---|
-| Accuracy of visual context | `content.js` DOM walk (exact, bbox-aligned) + optional local caption from Transformers.js |
-| Recall/precision of PII detection | `isSensitiveField()` in `content.js` — type/autocomplete/name/keyword based |
-| Precision of redaction | `offscreen.js` — hard black-box redaction on exact DOM-derived bounding boxes, done before any model or network call touches the image |
-| Client-side resource use | Local work is DOM query + canvas draw (cheap); the only heavy step (captioning) is optional and toggleable |
-| End-to-end latency | Orchestration in `background.js` logs each stage; mock mode isolates client-side latency from network/VLM latency for measurement |
-
-## Known limitations / next steps (be upfront about these with judges)
-
-- **Face blurring** is not wired in yet — the redaction pipeline already accepts
-  arbitrary bounding boxes, so a face-detection model (e.g. MediaPipe Face
-  Detector, WASM) can be dropped into `offscreen.js` and its boxes merged with
-  `sensitiveBoxes` with no other changes needed.
-- **PII detection is currently DOM/heuristic-based**, not full NER — the
-  cleanest next addition is a quantized NER model (ONNX Runtime Web) run in the
-  offscreen document over any OCR'd or DOM text, for freeform PII (names,
-  addresses) that regex/keyword matching misses.
-- The extension only captures the **visible viewport** (`captureVisibleTab`),
-  not the full scrollable page. Full-page capture requires `chrome.debugger` +
-  CDP (`Page.captureScreenshot` with `captureBeyondViewport`) or scroll-and-stitch.
-- CSP in `manifest.json` allows `connect-src` to `huggingface.co` so the
-  bundled Transformers.js library (vendored locally under
-  `extension/lib/transformers/`, never loaded from a CDN — Manifest V3
-  disallows remote code) can fetch model *weights* at runtime. Only the
-  non-threaded WASM backend is bundled (no `SharedArrayBuffer`/cross-origin
-  isolation required), which is what extension pages support reliably.
-  For a fully offline/air-gapped demo, pre-download the model weights once
-  on a networked machine (they get cached by the browser) before the demo.
+This verifies:
+- PII regular expressions (email, credit card, keywords).
+- Viewport scaling math across various DPR display settings.
+- Server token authentication (401 check).
+- Sensitive field leak detector (400 check).
+- Payload schema validation.
+- VLM tool use action structure.

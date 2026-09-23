@@ -2,9 +2,14 @@
   "name": "visual-privacy-agent",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "install:server": "npm install --prefix server",
     "start": "npm start --prefix server",
-    "dev": "npm run dev --prefix server"
+    "dev": "npm run dev --prefix server",
+    "test": "node --test tests/extension-rules.test.js && node --test server/tests/server.test.js"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0"
   }
 }
